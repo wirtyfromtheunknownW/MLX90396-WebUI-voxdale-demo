@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MLX90396 SFI Joystick & 4D Sensing Platform</title>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  
+  <link rel="stylesheet" href="webdesign.css" />
+
+  <style>
+    body {
+      background-image: url('resources/background.jpg');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      padding: var(--space-5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .app-shell {
+      width: min(1200px, 100%);
+      background: var(--color-canvas);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-5);
+      box-shadow: var(--shadow-md);
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--space-4);
+      border-bottom: 1.5px solid var(--color-border);
+      padding-bottom: var(--space-3);
+    }
+
+    .sfi-controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--color-surface);
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius-md);
+      border: 1.5px solid var(--color-border);
+      margin-bottom: var(--space-4);
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+
+    /* FULL-WIDTH TABS (Using Design System Variables) */
+    .view-tabs.ds-tabs__list {
+      display: flex;
+      gap: var(--space-1);
+      margin-bottom: var(--space-4);
+      padding: var(--space-1);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--color-surface) 70%, var(--color-border));
+      width: 100%;
+    }
+
+    .view-tab-btn.ds-tabs__tab {
+      flex: 1;
+      min-height: 2.5rem;
+      padding: 0.55rem 0.9rem;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--color-ink-muted);
+      font-family: var(--font-display);
+      font-size: var(--font-size-sm);
+      font-weight: 600;
+      letter-spacing: var(--letter-spacing-tight);
+      cursor: pointer;
+      transition: all var(--duration-fast) var(--ease-out);
+      text-align: center;
+    }
+
+    .view-tab-btn.ds-tabs__tab:hover {
+      color: var(--color-ink);
+      background: color-mix(in srgb, var(--color-surface-raised) 40%, transparent);
+    }
+
+    .view-tab-btn.active,
+    .view-tab-btn.ds-tabs__tab--active {
+      background: var(--color-surface-raised) !important;
+      color: var(--color-accent) !important;
+      box-shadow: var(--shadow-sm);
+      transform: translateY(-1px);
+    }
+
+    .tab-content {
+      display: none;
+      width: 100%;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* VIEWPORT CONTAINERS */
+    #canvas3d-container {
+      width: 100%;
+      height: 560px;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: var(--color-surface-raised);
+      position: relative;
+      cursor: grab;
+      border: 1.5px solid var(--color-border);
+    }
+    #canvas3d-container:active { cursor: grabbing; }
+
+    #canvas4d-container {
+      width: 100%;
+      height: 560px;
+      position: relative;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: var(--color-code-bg);
+      border: 1.5px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+    }
+
+    #simCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* FULL-SIZE ROBUST XYZ CHART WRAPPER */
+    .xyz-chart-wrapper {
+      position: relative;
+      width: 100%;
+      height: 560px;
+      background: var(--color-code-bg);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    #canvas-xyz-main {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+    #canvas-xyz-main:active { cursor: grabbing; }
+
+    /* FLOATING VIEW SWITCHER TOOLBAR */
+    .xyz-toolbar {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      z-index: 10;
+      display: flex;
+      gap: 6px;
+      background: color-mix(in srgb, var(--color-surface-raised) 85%, transparent);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 6px;
+      backdrop-filter: blur(8px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .btn-xyz-view {
+      background: transparent;
+      border: 1.5px solid transparent;
+      color: var(--color-ink-muted);
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-display);
+      font-size: var(--font-size-xs);
+      font-weight: 700;
+      letter-spacing: var(--letter-spacing-tight);
+      cursor: pointer;
+      transition: all var(--duration-fast) var(--ease-out);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-xyz-view:hover {
+      color: var(--color-ink);
+      background: var(--color-surface);
+    }
+
+    .btn-xyz-view.active {
+      color: var(--color-brand-contrast);
+      background: var(--color-brand);
+      border-color: var(--color-brand);
+    }
+
+    .xyz-legend {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      z-index: 10;
+      background: color-mix(in srgb, var(--color-surface-raised) 88%, transparent);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: 8px 14px;
+      font-family: var(--font-body);
+      font-size: var(--font-size-xs);
+      pointer-events: none;
+      display: flex;
+      gap: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .axis-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: var(--radius-sm);
+      margin-right: 4px;
+    }
+
+    .hint-overlay {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      background: color-mix(in srgb, var(--color-code-bg) 90%, transparent);
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-size: var(--font-size-xs);
+      color: var(--color-ink);
+      pointer-events: none;
+      border: 1px solid var(--color-border);
+    }
+
+    /* 4D Telemetry HUD */
+    .hud-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: color-mix(in srgb, var(--color-surface-raised) 90%, transparent);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      width: 260px;
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+      box-shadow: var(--shadow-md);
+    }
+
+    .hud-title {
+      margin: 0 0 6px 0;
+      font-family: var(--font-display);
+      font-size: var(--font-size-xs);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--color-accent);
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 4px;
+    }
+
+    .hud-metric {
+      display: flex;
+      justify-content: space-between;
+      margin: 4px 0;
+      font-family: var(--font-body);
+      font-size: var(--font-size-xs);
+    }
+
+    .hud-metric-label { color: var(--color-ink-muted); }
+    .hud-metric-value { font-weight: 700; }
+    .val-cyan { color: var(--color-accent); }
+    .val-orange { color: var(--color-warning); }
+    .val-green { color: var(--color-success); }
+
+    /* SFI BATTLE MATRIX STYLING */
+    .battle-matrix-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+    @media (max-width: 900px) {
+      .battle-matrix-grid { grid-template-columns: 1fr; }
+    }
+
+    .battle-card {
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-surface);
+      padding: var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      box-shadow: var(--shadow-sm);
+    }
+    .battle-card.fail { border-color: var(--color-danger); }
+    .battle-card.pass { border-color: var(--color-success); }
+
+    .battle-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: var(--space-2);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    /* Signal Bars (Req 1) */
+    .raw-signals-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+
+    .signal-bar-row {
+      display: grid;
+      grid-template-columns: 75px 1fr 70px;
+      align-items: center;
+      gap: 10px;
+      font-size: var(--font-size-xs);
+      font-family: var(--font-body);
+      font-weight: 600;
+    }
+
+    .signal-meter-bg {
+      height: 10px;
+      background: var(--color-surface-raised);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .signal-meter-fill {
+      height: 100%;
+      width: 50%;
+      border-radius: var(--radius-sm);
+      transition: width var(--duration-normal) var(--ease-out);
+    }
+
+    /* Signal Strength Gauge (Req 2) */
+    .magnitude-gauge-box {
+      background: var(--color-surface-raised);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: var(--space-2) var(--space-3);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .mag-val-large {
+      font-size: var(--font-size-lg);
+      font-weight: 700;
+      font-family: var(--font-display);
+    }
+
+    /* Radar Section */
+    .radar-matrix-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+
+    .radar-card {
+      background: var(--color-surface);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .radar-canvas {
+      width: 100%;
+      max-width: 320px;
+      height: 280px;
+      display: block;
+    }
+
+    .radar-badge {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      font-family: var(--font-display);
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      padding: 0.15rem 0.55rem;
+      border-radius: var(--radius-sm);
+    }
+
+    .plot3d-canvas {
+      width: 100%;
+      height: 260px;
+      border-radius: var(--radius-sm);
+      background: var(--color-code-bg);
+      border: 1px solid var(--color-border);
+      cursor: grab;
+    }
+    .plot3d-canvas:active { cursor: grabbing; }
+
+    /* Coil Controller Bar */
+    .coil-controller-box {
+      background: var(--color-surface);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--space-4);
+      flex-wrap: wrap;
+      gap: var(--space-3);
+    }
+
+    /* Debug Terminal */
+    .log-window {
+      height: 160px;
+      background: var(--color-code-bg);
+      border-radius: var(--radius-sm);
+      padding: var(--space-3);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: var(--font-size-xs);
+      overflow-y: auto;
+      white-space: pre-wrap;
+      border: 1.5px solid var(--color-border);
+      color: var(--color-code-fg);
+      margin-top: var(--space-4);
+    }
+    .log-rx { color: var(--color-ink-muted); } 
+    .log-okprompt { color: var(--color-success); } 
+    .log-badprompt { color: var(--color-danger); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+
+    <div class="header-row">
+      <div>
+        <h2 style="margin: 0; font-family: var(--font-display); font-size: var(--font-size-lg); font-weight: 700; color: var(--color-ink);">
+          MLX90396 Stray Field Immune (SFI) Joystick
+        </h2>
+        <span style="font-size: var(--font-size-xs); color: var(--color-ink-muted);">
+          Kinematics, Raw Signals, Polar Radar & SFI Battle Matrix
+        </span>
+      </div>
+      <button id="btn-connect" class="ds-button ds-button--primary ds-button--md">Connect USB</button>
+    </div>
+
+    <!-- CONTROLS BAR -->
+    <div class="sfi-controls-bar">
+      <div style="display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center;">
+        <button id="btn-start-demo" class="ds-button ds-button--primary ds-button--sm">Start Live Stream</button>
+        <button id="btn-stop-demo" class="ds-button ds-button--secondary ds-button--sm" disabled>Stop</button>
+        <button id="btn-pattern" class="ds-button ds-button--secondary ds-button--sm">Auto-Pattern</button>
+        <button id="btn-coil" class="ds-button ds-button--danger ds-button--sm">Stray Field Coil (5 mT)</button>
+        <button id="btn-reset-trace" class="ds-button ds-button--secondary ds-button--sm">Clear Trajectories</button>
+        <button id="btn-toggle-debug" class="ds-button ds-button--ghost ds-button--sm">Debug</button>
+      </div>
+      <span style="font-size: var(--font-size-xs); color: var(--color-ink-muted);" id="status-mode-txt">
+        Standby Mode (Connect USB or Start)
+      </span>
+    </div>
+
+    <!-- MAIN TABS -->
+    <div class="view-tabs ds-tabs__list">
+      <button class="view-tab-btn ds-tabs__tab active" data-tab="tab-battle">SFI Battle Matrix (Req 1-4)</button>
+      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-dome">3D Dome Model</button>
+      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-xyz">3D XYZ Chart (Z-UP)</button>
+      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-4d">4D Sensing & Velocity</button>
+    </div>
+
+    <!-- TAB 1: SFI BATTLE MATRIX -->
+    <div id="tab-battle" class="tab-content active">
+      
+      <!-- REQUIREMENT 4: HARDWARE / SOFTWARE COIL CONTROLLER -->
+      <div class="coil-controller-box">
+        <div>
+          <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; color: var(--color-warning); text-transform: uppercase;">
+            Requirement 4: Stray Field Disturbance Coil (SW + HW GPIO)
+          </span>
+          <p style="margin: 2px 0 0 0; font-size: var(--font-size-xs); color: var(--color-ink-muted);" id="coil-sub-desc">
+            Injects 5.0 mT external uniform stray field via SCPI GPIO on physical rig.
+          </p>
+        </div>
+        <div style="display: flex; gap: var(--space-2); align-items: center;">
+          <span id="coil-readout-lbl" class="ds-badge ds-badge--neutral">
+            COIL: OFF (0.0 mT)
+          </span>
+          <button id="btn-coil-toggle" class="ds-button ds-button--danger ds-button--sm">
+            Toggle Coil (5 mT)
+          </button>
+        </div>
+      </div>
+
+      <!-- REQUIREMENT 1 & 2: RAW SIGNALS & CALCULATED SIGNAL STRENGTH -->
+      <div class="battle-matrix-grid">
+        
+        <!-- LEFT: LEGACY 3D HALL (SINGLE PIXEL PX0) -->
+        <div class="battle-card fail">
+          <div class="battle-card-header">
+            <span style="font-family: var(--font-display); font-size: var(--font-size-sm); font-weight: 700; color: var(--color-danger);">
+              LEGACY STANDARD 3D HALL (PX0 VULNERABLE)
+            </span>
+            <span class="ds-badge ds-badge--danger ds-badge--sm">UNCOMPENSATED</span>
+          </div>
+
+          <!-- Req 1: Raw Signals Bars -->
+          <div class="raw-signals-list">
+            <div class="signal-bar-row">
+              <span style="color: var(--color-danger);">Raw Bx0:</span>
+              <div class="signal-meter-bg"><div id="meter-raw-bx" class="signal-meter-fill" style="background: var(--color-danger);"></div></div>
+              <span id="txt-raw-bx" style="color: var(--color-danger); text-align:right;">0.0 mT</span>
+            </div>
+            <div class="signal-bar-row">
+              <span style="color: var(--color-danger);">Raw By0:</span>
+              <div class="signal-meter-bg"><div id="meter-raw-by" class="signal-meter-fill" style="background: var(--color-danger);"></div></div>
+              <span id="txt-raw-by" style="color: var(--color-danger); text-align:right;">0.0 mT</span>
+            </div>
+            <div class="signal-bar-row">
+              <span style="color: var(--color-danger);">Raw Bz0:</span>
+              <div class="signal-meter-bg"><div id="meter-raw-bz" class="signal-meter-fill" style="background: var(--color-danger);"></div></div>
+              <span id="txt-raw-bz" style="color: var(--color-danger); text-align:right;">0.0 mT</span>
+            </div>
+          </div>
+
+          <!-- Req 2: Calculated Signal Strength Magnitude -->
+          <div class="magnitude-gauge-box" style="border-left: 3px solid var(--color-danger);">
+            <div>
+              <div style="font-family: var(--font-display); font-size: var(--font-size-xs); color: var(--color-ink-muted); text-transform: uppercase;">
+                Req 2: Signal Strength |B_std|
+              </div>
+              <span style="font-size: var(--font-size-xs); color: var(--color-danger);">√(Bx² + By² + Bz²)</span>
+            </div>
+            <span id="mag-val-std" class="mag-val-large" style="color: var(--color-danger);">0.0 mT</span>
+          </div>
+
+          <!-- 3D Vector Plot -->
+          <div class="plot3d-canvas" id="canvas3d-std-plot"></div>
+        </div>
+
+        <!-- RIGHT: MLX90396 DIFFERENTIAL SFI (PX02) -->
+        <div class="battle-card pass">
+          <div class="battle-card-header">
+            <span style="font-family: var(--font-display); font-size: var(--font-size-sm); font-weight: 700; color: var(--color-success);">
+              MLX90396 DIFFERENTIAL SFI (PX02 IMMUNE)
+            </span>
+            <span class="ds-badge ds-badge--success ds-badge--sm">ACTIVE GRADIENT DSP</span>
+          </div>
+
+          <!-- Req 1: Differential Signals Bars -->
+          <div class="raw-signals-list">
+            <div class="signal-bar-row">
+              <span style="color: var(--color-success);">Diff ΔBx:</span>
+              <div class="signal-meter-bg"><div id="meter-diff-bx" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
+              <span id="txt-diff-bx" style="color: var(--color-success); text-align:right;">0.0 mT</span>
+            </div>
+            <div class="signal-bar-row">
+              <span style="color: var(--color-success);">Diff ΔBy:</span>
+              <div class="signal-meter-bg"><div id="meter-diff-by" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
+              <span id="txt-diff-by" style="color: var(--color-success); text-align:right;">0.0 mT</span>
+            </div>
+            <div class="signal-bar-row">
+              <span style="color: var(--color-success);">Diff ΔBz:</span>
+              <div class="signal-meter-bg"><div id="meter-diff-bz" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
+              <span id="txt-diff-bz" style="color: var(--color-success); text-align:right;">0.0 mT</span>
+            </div>
+          </div>
+
+          <!-- Req 2: Calculated Signal Strength Magnitude -->
+          <div class="magnitude-gauge-box" style="border-left: 3px solid var(--color-success);">
+            <div>
+              <div style="font-family: var(--font-display); font-size: var(--font-size-xs); color: var(--color-ink-muted); text-transform: uppercase;">
+                Req 2: Signal Strength |B_diff|
+              </div>
+              <span style="font-size: var(--font-size-xs); color: var(--color-success);">√(ΔBx² + ΔBy² + ΔBz²)</span>
+            </div>
+            <span id="mag-val-diff" class="mag-val-large" style="color: var(--color-success);">0.0 mT</span>
+          </div>
+
+          <!-- 3D Vector Plot -->
+          <div class="plot3d-canvas" id="canvas3d-mlx-plot"></div>
+        </div>
+
+      </div>
+
+      <!-- REQUIREMENT 3: DIFFERENTIAL RADAR -->
+      <div class="radar-matrix-row">
+        <div class="radar-card" style="border-top: 3px solid var(--color-success);">
+          <span class="radar-badge ds-badge ds-badge--success">
+            Req 3: SFI Differential Radar
+          </span>
+          <canvas id="radarCanvasMlx" class="radar-canvas"></canvas>
+          <div style="margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-success); font-weight: 600;">
+            Angle θ_diff: <b id="radar-angle-mlx">0.0°</b> | Error: <b id="radar-error-mlx">0.0°</b>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: 3D DOME MODEL -->
+    <div id="tab-dome" class="tab-content">
+      <div class="ds-card ds-card--pad-md" style="width: 100%; display: flex; flex-direction: column; gap: var(--space-4);">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
+            <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; color: var(--color-ink-muted);">
+              Dome Kinematics (Left Click to Rotate / Orbit)
+            </span>
+            <span style="font-size: var(--font-size-xs); font-weight: 700; color: var(--color-accent);" id="joy-pos-text">
+              Tilt X: 0.0° | Tilt Y: 0.0° | Press Z: 0.0 mm
+            </span>
+          </div>
+          <div id="canvas3d-container">
+            <div class="hint-overlay">Left Click + Drag: Orbit Camera | Scroll: Zoom</div>
+          </div>
+        </div>
+
+        <!-- MOVED: Legacy Angle Radar below 3D Dome Viewport -->
+        <div class="radar-card" style="border-top: 3px solid var(--color-success); align-self: center; width: 100%;">
+          <span class="radar-badge ds-badge ds-badge--successs">
+            Req 3: Legacy Angle Radar
+          </span>
+          <canvas id="radarCanvasStd" class="radar-canvas"></canvas>
+          <div style="margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-success); font-weight: 600;">
+            Angle θ_std: <b id="radar-angle-std">0.0°</b> | Error: <b id="radar-error-std">0.0°</b>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: 3D XYZ CHART -->
+    <div id="tab-xyz" class="tab-content">
+      <div class="ds-card ds-card--pad-md" style="width: 100%;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
+          <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; color: var(--color-success);">
+            3D Field Vector Space (Live Stream + Continuous Free 3D Orbit)
+          </span>
+          <span style="font-size: var(--font-size-xs); color: var(--color-ink-muted);">MLX90396 SFI Differential Signal</span>
+        </div>
+
+        <div class="xyz-chart-wrapper">
+          <div class="xyz-toolbar">
+            <button class="btn-xyz-view active" data-view="iso">Isometric (3D)</button>
+            <button class="btn-xyz-view" data-view="x">X View (Side Y-Z)</button>
+            <button class="btn-xyz-view" data-view="y">Y View (Front X-Z)</button>
+            <button class="btn-xyz-view" data-view="z">Z View (Top X-Y)</button>
+          </div>
+
+          <div class="xyz-legend">
+            <span><span class="axis-dot" style="background: var(--color-danger);"></span>+X: <b id="xyz-val-x" style="color: var(--color-danger);">0.0</b> mT</span>
+            <span><span class="axis-dot" style="background: var(--color-success);"></span>+Y: <b id="xyz-val-y" style="color: var(--color-success);">0.0</b> mT</span>
+            <span><span class="axis-dot" style="background: var(--color-info);"></span>+Z: <b id="xyz-val-z" style="color: var(--color-info);">0.0</b> mT</span>
+          </div>
+
+          <div id="canvas-xyz-main"></div>
+
+          <div class="hint-overlay">
+            Left Click + Drag: Rotate Angle Freely | Scroll: Zoom | +Z Points Vertical UP
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: 4D SENSING & VELOCITY -->
+    <div id="tab-4d" class="tab-content">
+      <div class="ds-card ds-card--pad-md" style="width: 100%;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
+          <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; color: var(--color-accent);">
+            4D Movement Telemetry & Particle Stream (From Example 2)
+          </span>
+          <span style="font-size: var(--font-size-xs); color: var(--color-warning);">Dynamic Magnetic Flux</span>
+        </div>
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
+          <div style="display: flex; gap: var(--space-2);">
+            <button id="btn-mode-pos" class="ds-button ds-button--primary ds-button--sm">Position Control</button>
+            <button id="btn-mode-vel" class="ds-button ds-button--secondary ds-button--sm">Velocity Control</button>
+          </div>
+          <span id="ctrl-mode-desc" style="font-size: var(--font-size-xs); font-weight: 600; color: var(--color-accent);">
+            Mode: Direct Stick-to-Position Mapping
+          </span>
+        </div>
+
+        <div id="canvas4d-container">
+          <canvas id="simCanvas"></canvas>
+          
+          <div class="hud-overlay">
+            <div class="hud-title">4D Movement Telemetry</div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">X Axis (Tilt L/R):</span>
+              <span class="hud-metric-value val-cyan" id="val-x">0.00</span>
+            </div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">Y Axis (Tilt F/B):</span>
+              <span class="hud-metric-value val-cyan" id="val-y">0.00</span>
+            </div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">Z Axis (Depth Press):</span>
+              <span class="hud-metric-value val-cyan" id="val-z">0.00</span>
+            </div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">Velocity (Speed):</span>
+              <span class="hud-metric-value val-orange" id="val-vel">0.0 px/s</span>
+            </div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">Force / Pressure:</span>
+              <span class="hud-metric-value val-orange" id="val-force">0%</span>
+            </div>
+            
+            <div class="hud-title" style="margin-top: 10px;">Single IC Sensor State</div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">Field Sensing Mode:</span>
+              <span class="hud-metric-value val-green">3D Hall SFI</span>
+            </div>
+            <div class="hud-metric">
+              <span class="hud-metric-label">Magnetic Vector:</span>
+              <span class="hud-metric-value val-cyan" id="val-flux">0.0 mT</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TERMINAL DEBUG -->
+    <div id="mini-log-window" class="log-window hidden"></div>
+
+    <!-- SERIAL MODAL -->
+    <div id="connect-modal" class="ds-modal-root hidden">
+      <div class="ds-modal__backdrop"></div>
+      <div class="ds-modal">
+        <div class="ds-modal__header">
+          <h3 class="ds-modal__title">Hardware Connection</h3>
+          <button id="btn-close-modal" class="ds-modal__close">✕</button>
+        </div>
+        <div class="ds-modal__body">
+          <div class="ds-field" style="width: 100%; margin-bottom: var(--space-3);">
+            <label class="ds-field__label" for="sel-driver-type">Target Device Driver</label>
+            <select id="sel-driver-type" class="ds-field__input">
+              <option value="scpi" selected>SCPI Bridge (MLX90396 SPI API)</option>
+              <option value="arduino">Direct Arduino Telemetry (CSV Stream)</option>
+            </select>
+          </div>
+
+          <div class="ds-field" style="width: 100%; margin-bottom: var(--space-3);">
+            <label class="ds-field__label" for="sel-baud-rate">Serial Baud Rate</label>
+            <select id="sel-baud-rate" class="ds-field__input">
+              <option value="115200" selected>115200</option>
+              <option value="230400">230400</option>
+              <option value="500000">500000</option>  
+              <option value="9600">9600</option>
+            </select>
+          </div>
+
+          <div class="ds-field" id="wrap-conn-type" style="width: 100%; margin-bottom: var(--space-3);">
+            <label class="ds-field__label" for="sel-conn-type">SPI Bus Type (SCPI Mode)</label>
+            <select id="sel-conn-type" class="ds-field__input">
+              <option value=":SPI">Cable Connection (:SPI)</option>
+              <option value=":SPI2">Header Connection (:SPI2)</option>
+            </select>
+          </div>
+        </div>
+        <div class="ds-modal__footer">
+          <button id="btn-modal-connect" class="ds-button ds-button--primary ds-button--full">Open Serial Port</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+  
+  <script type="module" src="app.js"></script>
+</body>
+</html>
