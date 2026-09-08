@@ -9,6 +9,9 @@ let coilActive = false;
 let animTime = 0;
 let joyX = 0, joyY = 0, joyZ = 0;
 let isLiveHardwareConnected = false;
+let lastKinematicsAt = performance.now();
+let previousJoy = { x: 0, y: 0, z: 0 };
+let motionTelemetry = { velocity: 0, force: 0, x: 0, y: 0, z: 0 };
 let sens = [1.0, 1.0, 1.0, 1.0];
 
 let stdTraceHistory = [];
@@ -41,12 +44,24 @@ export function setHardwareCoilCallback(cb) {
   onHardwareCoilToggle = cb;
 }
 
+export function setSfiHardwareTracking(active) {
+  isLiveHardwareConnected = active;
+}
+
 // EXACT ORIGINAL DOME ENTRY FUNCTION
 export function updateSfiDomeKinematics(x, y, z, telemetryPayload = null) {
-  isLiveHardwareConnected = true;
+  const now = performance.now();
+  const elapsedSeconds = Math.max((now - lastKinematicsAt) / 1000, 1 / 240);
+  lastKinematicsAt = now;
   joyX = Math.max(-1, Math.min(1, x));
   joyY = Math.max(-1, Math.min(1, y));
   joyZ = Math.max(-1, Math.min(1, z));
+  motionTelemetry.x = (joyX - previousJoy.x) / elapsedSeconds;
+  motionTelemetry.y = (joyY - previousJoy.y) / elapsedSeconds;
+  motionTelemetry.z = (joyZ - previousJoy.z) / elapsedSeconds;
+  motionTelemetry.velocity = Math.hypot(motionTelemetry.x, motionTelemetry.y, motionTelemetry.z) * 90;
+  motionTelemetry.force = Math.min(100, Math.hypot(joyX, joyY) * 55 + Math.max(0, joyZ) * 45);
+  previousJoy = { x: joyX, y: joyY, z: joyZ };
 
   if (telemetryPayload) {
     liveHardwarePacket = telemetryPayload;
@@ -273,13 +288,7 @@ scene.add(domeMesh);
   stdPlot = create3DFieldPlot('canvas3d-std-plot', 0xff3366);
   mlxPlot = create3DFieldPlot('canvas3d-mlx-plot', 0x00ff88);
 
-  // --- 3. UNIFIED Z-UP 3D XYZ CHART ---
-  initXyzChart();
-
-  // --- 4. 4D CANVAS SETUP ---
-  init4DCanvas();
-
-  // --- 5. RADAR CANVASES ---
+  // --- 3. RADAR CANVASES ---
   initRadarCanvases();
 
   function animate() {
@@ -309,6 +318,16 @@ scene.add(domeMesh);
       stick4D.targetX = joyX * 90;
       stick4D.targetY = joyY * 90;
       stick4D.targetZ = Math.max(0, (joyZ + 1) * 35);
+
+      const now = performance.now();
+      const elapsedSeconds = Math.max((now - lastKinematicsAt) / 1000, 1 / 240);
+      lastKinematicsAt = now;
+      motionTelemetry.x = (joyX - previousJoy.x) / elapsedSeconds;
+      motionTelemetry.y = (joyY - previousJoy.y) / elapsedSeconds;
+      motionTelemetry.z = (joyZ - previousJoy.z) / elapsedSeconds;
+      motionTelemetry.velocity = Math.hypot(motionTelemetry.x, motionTelemetry.y, motionTelemetry.z) * 90;
+      motionTelemetry.force = Math.min(100, Math.hypot(joyX, joyY) * 55 + Math.max(0, joyZ) * 45);
+      previousJoy = { x: joyX, y: joyY, z: joyZ };
     }
 
     // Kinematics along Dome
@@ -343,7 +362,8 @@ scene.add(domeMesh);
 
     let mlxDBx = trueBx;
     let mlxDBy = trueBy;
-    let mlxDBz = 22.0 + trueBz;
+    let mlxDBzX = 22.0 + trueBz;
+    let mlxDBzY = 22.0 + trueBz;
 
     // Use live hardware packet if available
     if (isLiveHardwareConnected && liveHardwarePacket && liveHardwarePacket.p0Raw) {
@@ -353,14 +373,15 @@ scene.add(domeMesh);
 
       mlxDBx = liveHardwarePacket.diffRaw.x / 20;
       mlxDBy = liveHardwarePacket.diffRaw.y / 20;
-      mlxDBz = liveHardwarePacket.diffRaw.z / 20;
+      mlxDBzX = liveHardwarePacket.diffRaw.z / 20;
+      mlxDBzY = (liveHardwarePacket.diffRaw.bzY ?? liveHardwarePacket.diffRaw.z) / 20;
     }
 
     // Calculated Signal Strength Magnitude
     let magStd = Math.sqrt(stdBx ** 2 + stdBy ** 2 + stdBz ** 2);
-    let magDiff = Math.sqrt(mlxDBx ** 2 + mlxDBy ** 2 + mlxDBz ** 2);
+    let magDiff = Math.sqrt(mlxDBx ** 2 + mlxDBy ** 2 + mlxDBzX ** 2 + mlxDBzY ** 2);
 
-    updateSignalBarsUI(stdBx, stdBy, stdBz, mlxDBx, mlxDBy, mlxDBz, magStd, magDiff);
+    updateSignalBarsUI(stdBx, stdBy, stdBz, mlxDBx, mlxDBy, mlxDBzX, mlxDBzY, magStd, magDiff);
 
     // Radar Angles
     let trueAngleDeg = (Math.atan2(joyY, joyX) * 180 / Math.PI + 360) % 360;
@@ -383,36 +404,35 @@ scene.add(domeMesh);
     if (angleMlxEl) angleMlxEl.innerText = diffAngleDeg.toFixed(1) + '°';
     if (errorMlxEl) errorMlxEl.innerText = diffError.toFixed(1) + '°';
 
-    stdTraceHistory.push({ x: stdBx, y: stdBy, z: stdBz });
-    mlxTraceHistory.push({ x: mlxDBx, y: mlxDBy, z: mlxDBz });
-
-    if (stdTraceHistory.length > 120) stdTraceHistory.shift();
-    if (mlxTraceHistory.length > 120) mlxTraceHistory.shift();
+    const alpha = Math.atan2(joyY, Math.hypot(joyX, joyZ)) * 180 / Math.PI;
+    const beta = Math.atan2(joyX, Math.hypot(joyY, joyZ)) * 180 / Math.PI;
+    const alphaEl = document.getElementById('angle-alpha');
+    const betaEl = document.getElementById('angle-beta');
+    const thetaEl = document.getElementById('angle-theta');
+    if (alphaEl) alphaEl.innerText = alpha.toFixed(1) + '°';
+    if (betaEl) betaEl.innerText = beta.toFixed(1) + '°';
+    if (thetaEl) thetaEl.innerText = trueAngleDeg.toFixed(1) + '°';
 
    // --- ONLY PUSH HISTORY IF THE TABS THAT USE IT ARE ACTIVE ---
     const activeTab = document.querySelector('.tab-content.active')?.id;
 
-    if (activeTab === 'tab-battle' || activeTab === 'tab-xyz') {
+    if (activeTab === 'tab-telemetry') {
       stdTraceHistory.push({ x: stdBx, y: stdBy, z: stdBz });
-      mlxTraceHistory.push({ x: mlxDBx, y: mlxDBy, z: mlxDBz });
+      mlxTraceHistory.push({ x: mlxDBx, y: mlxDBy, z: mlxDBzX });
 
       if (stdTraceHistory.length > 120) stdTraceHistory.shift();
       if (mlxTraceHistory.length > 120) mlxTraceHistory.shift();
     }
 
 // --- RENDER ONLY THE ACTIVE TAB ---
-    if (activeTab === 'tab-dome' && mainSceneObj) {
+    if (activeTab === 'tab-idle' && mainSceneObj) {
       controls.update();
       renderer.render(scene, camera);
-      // DRAW LEGACY RADAR HERE ON DOME TAB
-      drawRadar(radarCtxStd, stdBx, stdBy, trueBx, trueBy, '#00ff88', 'LEGACY 3D HALL');
-    } else if (activeTab === 'tab-battle') {
+    } else if (activeTab === 'tab-telemetry') {
       if (stdPlot) update3DPlot(stdPlot, stdTraceHistory, true);
       if (mlxPlot) update3DPlot(mlxPlot, mlxTraceHistory, false);
-      // ONLY DIFFERENTIAL RADAR REMAINS ON BATTLE TAB
+      drawRadar(radarCtxStd, stdBx, stdBy, trueBx, trueBy, '#ff3366', 'LEGACY 3D HALL');
       drawRadar(radarCtxMlx, mlxDBx, mlxDBy, trueBx, trueBy, '#00ff88', 'MLX90396 SFI');
-    } else if (activeTab === 'tab-xyz' && xyzChartObj) {
-      updateXyzChart(mlxTraceHistory, mlxDBx, mlxDBy, mlxDBz);
     }
   }
 
@@ -420,13 +440,13 @@ scene.add(domeMesh);
 }
 
 // --- SIGNAL BARS & MAGNITUDE UI ---
-function updateSignalBarsUI(bx0, by0, bz0, dbx, dby, dbz, magStd, magDiff) {
-  const updateBar = (meterId, txtId, val, maxRange = 35) => {
+function updateSignalBarsUI(bx0, by0, bz0, dbx, dby, dbzX, dbzY, magStd, magDiff) {
+  const updateBar = (meterId, txtId, val, maxRange = 35, unit = 'mT') => {
     const meter = document.getElementById(meterId);
     const txt = document.getElementById(txtId);
     if (!meter || !txt) return;
 
-    txt.innerText = val.toFixed(1) + ' mT';
+    txt.innerText = val.toFixed(1) + ' ' + unit;
     const percent = Math.min(100, Math.max(0, ((val + maxRange) / (maxRange * 2)) * 100));
     meter.style.width = percent + '%';
   };
@@ -435,9 +455,10 @@ function updateSignalBarsUI(bx0, by0, bz0, dbx, dby, dbz, magStd, magDiff) {
   updateBar('meter-raw-by', 'txt-raw-by', by0);
   updateBar('meter-raw-bz', 'txt-raw-bz', bz0);
 
-  updateBar('meter-diff-bx', 'txt-diff-bx', dbx);
-  updateBar('meter-diff-by', 'txt-diff-by', dby);
-  updateBar('meter-diff-bz', 'txt-diff-bz', dbz);
+  updateBar('meter-diff-bx', 'txt-diff-bx', dbx, 35, 'mT/mm');
+  updateBar('meter-diff-by', 'txt-diff-by', dby, 35, 'mT/mm');
+  updateBar('meter-diff-bz', 'txt-diff-bz', dbzX, 35, 'mT/mm');
+  updateBar('meter-diff-bz-y', 'txt-diff-bz-y', dbzY, 35, 'mT/mm');
 
   const elMagStd = document.getElementById('mag-val-std');
   const elMagDiff = document.getElementById('mag-val-diff');
@@ -730,15 +751,37 @@ function create3DFieldPlot(elementId, ringColor) {
   const lineMesh = new THREE.Line(lineGeo, lineMat);
   plotScene.add(lineMesh);
 
-  const headMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 16, 16),
-    new THREE.MeshBasicMaterial({ color: ringColor })
+  // 6 mm-equivalent cylindrical magnet: red north cap, steel body, blue south cap.
+  const magnet = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.75, 0.75, 0.5, 32),
+    new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.75, roughness: 0.22 })
   );
-  plotScene.add(headMesh);
+  const northCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.76, 0.76, 0.08, 32),
+    new THREE.MeshStandardMaterial({ color: 0xff3366, metalness: 0.35, roughness: 0.25 })
+  );
+  const southCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.76, 0.76, 0.08, 32),
+    new THREE.MeshStandardMaterial({ color: 0x0088ff, metalness: 0.35, roughness: 0.25 })
+  );
+  northCap.position.y = 0.29;
+  southCap.position.y = -0.29;
+  magnet.add(body, northCap, southCap);
+  plotScene.add(magnet);
+
+  plotScene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
+  keyLight.position.set(5, 8, 6);
+  plotScene.add(keyLight);
+
+  const velocityVector = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.01, 0x00d2ff, 0.32, 0.16);
+  const forceVector = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 0.01, 0xffaa00, 0.32, 0.16);
+  plotScene.add(velocityVector, forceVector);
 
   return {
     scene: plotScene, camera: plotCamera, renderer: plotRenderer, controls: plotControls,
-    lineGeo, headMesh, maxPoints, el
+    lineGeo, magnet, velocityVector, forceVector, maxPoints, el
   };
 }
 
@@ -759,8 +802,23 @@ function update3DPlot(plot, history, isCorrupted) {
 
   if (len > 0) {
     const last = history[len - 1];
-    plot.headMesh.position.set(last.x * 0.18, last.y * 0.18 - 3, (last.z - 22.0) * 0.18);
-    plot.headMesh.material.color.setHex(isCorrupted && coilActive ? 0xff3366 : 0x00ff88);
+    const position = new THREE.Vector3(last.x * 0.18, last.y * 0.18 - 3, (last.z - 22.0) * 0.18);
+    plot.magnet.position.copy(position);
+    plot.magnet.rotation.y += 0.015;
+
+    const velocity = new THREE.Vector3(motionTelemetry.x, motionTelemetry.y, motionTelemetry.z);
+    if (velocity.lengthSq() > 0.0001) {
+      plot.velocityVector.position.copy(position);
+      plot.velocityVector.setDirection(velocity.normalize());
+      plot.velocityVector.setLength(Math.min(2.8, Math.max(0.2, motionTelemetry.velocity / 160)), 0.32, 0.16);
+    }
+    const force = new THREE.Vector3(joyX, Math.max(0.15, joyZ + 0.2), joyY).normalize();
+    plot.forceVector.position.copy(position);
+    plot.forceVector.setDirection(force);
+    plot.forceVector.setLength(Math.max(0.2, motionTelemetry.force / 55), 0.32, 0.16);
+
+    const overlay = document.getElementById(isCorrupted ? 'plot-overlay-std' : 'plot-overlay-mlx');
+    if (overlay) overlay.innerHTML = `v ${motionTelemetry.velocity.toFixed(1)} px/s<br>F ${motionTelemetry.force.toFixed(0)}%`;
   }
 
   plot.controls.update();

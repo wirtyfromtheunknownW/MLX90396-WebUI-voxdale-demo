@@ -281,6 +281,38 @@
       gap: var(--space-4);
       margin-bottom: var(--space-4);
     }
+
+    .telemetry-hud-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+
+    .telemetry-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-2);
+    }
+
+    .telemetry-summary > div {
+      padding: var(--space-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-surface-raised);
+    }
+
+    .telemetry-summary span {
+      display: block;
+      color: var(--color-ink-muted);
+      font-size: var(--font-size-xs);
+    }
+
+    .telemetry-summary b {
+      color: var(--color-accent);
+      font-family: var(--font-display);
+      font-size: var(--font-size-md);
+    }
     @media (max-width: 900px) {
       .battle-matrix-grid { grid-template-columns: 1fr; }
     }
@@ -359,7 +391,7 @@
     /* Radar Section */
     .radar-matrix-row {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr 1fr;
       gap: var(--space-4);
       margin-bottom: var(--space-4);
     }
@@ -401,6 +433,21 @@
       background: var(--color-code-bg);
       border: 1px solid var(--color-border);
       cursor: grab;
+      position: relative;
+    }
+    .plot-overlay {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      padding: 5px 8px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--color-code-bg) 88%, transparent);
+      color: var(--color-ink);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 10px;
+      line-height: 1.45;
+      pointer-events: none;
     }
     .plot3d-canvas:active { cursor: grabbing; }
 
@@ -436,6 +483,16 @@
     .log-okprompt { color: var(--color-success); } 
     .log-badprompt { color: var(--color-danger); }
     .hidden { display: none !important; }
+    @media (max-width: 900px) {
+      .telemetry-hud-grid, .radar-matrix-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      body { padding: var(--space-2); }
+      .app-shell { padding: var(--space-3); }
+      .header-row { align-items: flex-start; gap: var(--space-2); }
+      #canvas3d-container { height: 420px; }
+      .telemetry-summary { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -468,16 +525,14 @@
       </span>
     </div>
 
-    <!-- MAIN TABS -->
+    <!-- MAIN OPERATIONAL TABS -->
     <div class="view-tabs ds-tabs__list">
-      <button class="view-tab-btn ds-tabs__tab active" data-tab="tab-battle">SFI Battle Matrix (Req 1-4)</button>
-      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-dome">3D Dome Model</button>
-      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-xyz">3D XYZ Chart (Z-UP)</button>
-      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-4d">4D Sensing & Velocity</button>
+      <button class="view-tab-btn ds-tabs__tab active" data-tab="tab-telemetry">Live Telemetry &amp; Battle Matrix</button>
+      <button class="view-tab-btn ds-tabs__tab" data-tab="tab-idle">Idle / Auto-Pattern &amp; Dome Kinematics</button>
     </div>
 
-    <!-- TAB 1: SFI BATTLE MATRIX -->
-    <div id="tab-battle" class="tab-content active">
+    <!-- TAB 1: LIVE TELEMETRY & BATTLE MATRIX -->
+    <div id="tab-telemetry" class="tab-content active">
       
       <!-- REQUIREMENT 4: HARDWARE / SOFTWARE COIL CONTROLLER -->
       <div class="coil-controller-box">
@@ -499,8 +554,14 @@
         </div>
       </div>
 
+      <div class="telemetry-summary" style="margin-bottom: var(--space-4);">
+        <div><span>Alpha tilt</span><b id="angle-alpha">0.0°</b></div>
+        <div><span>Beta tilt</span><b id="angle-beta">0.0°</b></div>
+        <div><span>Heading theta</span><b id="angle-theta">0.0°</b></div>
+      </div>
+
       <!-- REQUIREMENT 1 & 2: RAW SIGNALS & CALCULATED SIGNAL STRENGTH -->
-      <div class="battle-matrix-grid">
+      <div class="telemetry-hud-grid">
         
         <!-- LEFT: LEGACY 3D HALL (SINGLE PIXEL PX0) -->
         <div class="battle-card fail">
@@ -540,9 +601,6 @@
             </div>
             <span id="mag-val-std" class="mag-val-large" style="color: var(--color-danger);">0.0 mT</span>
           </div>
-
-          <!-- 3D Vector Plot -->
-          <div class="plot3d-canvas" id="canvas3d-std-plot"></div>
         </div>
 
         <!-- RIGHT: MLX90396 DIFFERENTIAL SFI (PX02) -->
@@ -557,19 +615,24 @@
           <!-- Req 1: Differential Signals Bars -->
           <div class="raw-signals-list">
             <div class="signal-bar-row">
-              <span style="color: var(--color-success);">Diff ΔBx:</span>
+              <span style="color: var(--color-success);">ΔBx/Δx:</span>
               <div class="signal-meter-bg"><div id="meter-diff-bx" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
-              <span id="txt-diff-bx" style="color: var(--color-success); text-align:right;">0.0 mT</span>
+              <span id="txt-diff-bx" style="color: var(--color-success); text-align:right;">0.0 mT/mm</span>
             </div>
             <div class="signal-bar-row">
-              <span style="color: var(--color-success);">Diff ΔBy:</span>
+              <span style="color: var(--color-success);">ΔBy/Δy:</span>
               <div class="signal-meter-bg"><div id="meter-diff-by" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
-              <span id="txt-diff-by" style="color: var(--color-success); text-align:right;">0.0 mT</span>
+              <span id="txt-diff-by" style="color: var(--color-success); text-align:right;">0.0 mT/mm</span>
             </div>
             <div class="signal-bar-row">
-              <span style="color: var(--color-success);">Diff ΔBz:</span>
+              <span style="color: var(--color-success);">ΔBz/Δx:</span>
               <div class="signal-meter-bg"><div id="meter-diff-bz" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
-              <span id="txt-diff-bz" style="color: var(--color-success); text-align:right;">0.0 mT</span>
+              <span id="txt-diff-bz" style="color: var(--color-success); text-align:right;">0.0 mT/mm</span>
+            </div>
+            <div class="signal-bar-row">
+              <span style="color: var(--color-success);">ΔBz/Δy:</span>
+              <div class="signal-meter-bg"><div id="meter-diff-bz-y" class="signal-meter-fill" style="background: var(--color-success);"></div></div>
+              <span id="txt-diff-bz-y" style="color: var(--color-success); text-align:right;">0.0 mT/mm</span>
             </div>
           </div>
 
@@ -579,39 +642,57 @@
               <div style="font-family: var(--font-display); font-size: var(--font-size-xs); color: var(--color-ink-muted); text-transform: uppercase;">
                 Req 2: Signal Strength |B_diff|
               </div>
-              <span style="font-size: var(--font-size-xs); color: var(--color-success);">√(ΔBx² + ΔBy² + ΔBz²)</span>
+              <span style="font-size: var(--font-size-xs); color: var(--color-success);">√((ΔBx/Δx)² + (ΔBy/Δy)² + (ΔBz/Δx)² + (ΔBz/Δy)²)</span>
             </div>
             <span id="mag-val-diff" class="mag-val-large" style="color: var(--color-success);">0.0 mT</span>
           </div>
 
-          <!-- 3D Vector Plot -->
-          <div class="plot3d-canvas" id="canvas3d-mlx-plot"></div>
         </div>
-
       </div>
 
-      <!-- REQUIREMENT 3: DIFFERENTIAL RADAR -->
+      <!-- MIDDLE: 3D MAGNET FIELD PLOTS -->
+      <div class="battle-matrix-grid">
+        <div class="battle-card fail">
+          <div class="battle-card-header"><span>Legacy field and 6 mm magnet model</span><span class="ds-badge ds-badge--danger">STRAY-SENSITIVE</span></div>
+          <div class="plot3d-canvas" id="canvas3d-std-plot"><div id="plot-overlay-std" class="plot-overlay">v 0.0 px/s<br>F 0%</div></div>
+        </div>
+        <div class="battle-card pass">
+          <div class="battle-card-header"><span>MLX90396 differential field and 6 mm magnet model</span><span class="ds-badge ds-badge--success">SFI COMPENSATED</span></div>
+          <div class="plot3d-canvas" id="canvas3d-mlx-plot"><div id="plot-overlay-mlx" class="plot-overlay">v 0.0 px/s<br>F 0%</div></div>
+        </div>
+      </div>
+
+      <!-- BOTTOM: DUAL 2D POLAR RADARS -->
       <div class="radar-matrix-row">
+        <div class="radar-card" style="border-top: 3px solid var(--color-danger);">
+          <span class="radar-badge ds-badge ds-badge--danger">
+            Legacy Standard 3D Hall Radar
+          </span>
+          <canvas id="radarCanvasStd" class="radar-canvas"></canvas>
+          <div style="margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-danger); font-weight: 600;">
+            θ_std: <b id="radar-angle-std">0.0°</b> | Error: <b id="radar-error-std">0.0°</b>
+          </div>
+        </div>
         <div class="radar-card" style="border-top: 3px solid var(--color-success);">
           <span class="radar-badge ds-badge ds-badge--success">
-            Req 3: SFI Differential Radar
+            MLX90396 Differential SFI Radar
           </span>
           <canvas id="radarCanvasMlx" class="radar-canvas"></canvas>
           <div style="margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-success); font-weight: 600;">
-            Angle θ_diff: <b id="radar-angle-mlx">0.0°</b> | Error: <b id="radar-error-mlx">0.0°</b>
+            θ_diff: <b id="radar-angle-mlx">0.0°</b> | Error: <b id="radar-error-mlx">0.0°</b>
           </div>
         </div>
       </div>
 
     </div>
 
-    <!-- TAB 2: 3D DOME MODEL -->
-    <div id="tab-dome" class="tab-content">
+    <!-- TAB 2: IDLE / AUTO-PATTERN & DOME KINEMATICS -->
+    <div id="tab-idle" class="tab-content">
       <div class="ds-card ds-card--pad-md" style="width: 100%; display: flex; flex-direction: column; gap: var(--space-4);">
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
             <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; color: var(--color-ink-muted);">
-              Dome Kinematics (Left Click to Rotate / Orbit)
+              Dome Kinematics: auto-pattern transitions to live hardware telemetry
             </span>
             <span style="font-size: var(--font-size-xs); font-weight: 700; color: var(--color-accent);" id="joy-pos-text">
               Tilt X: 0.0° | Tilt Y: 0.0° | Press Z: 0.0 mm
@@ -622,109 +703,6 @@
           </div>
         </div>
 
-        <!-- MOVED: Legacy Angle Radar below 3D Dome Viewport -->
-        <div class="radar-card" style="border-top: 3px solid var(--color-success); align-self: center; width: 100%;">
-          <span class="radar-badge ds-badge ds-badge--successs">
-            Req 3: Legacy Angle Radar
-          </span>
-          <canvas id="radarCanvasStd" class="radar-canvas"></canvas>
-          <div style="margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-success); font-weight: 600;">
-            Angle θ_std: <b id="radar-angle-std">0.0°</b> | Error: <b id="radar-error-std">0.0°</b>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 3: 3D XYZ CHART -->
-    <div id="tab-xyz" class="tab-content">
-      <div class="ds-card ds-card--pad-md" style="width: 100%;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
-          <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; color: var(--color-success);">
-            3D Field Vector Space (Live Stream + Continuous Free 3D Orbit)
-          </span>
-          <span style="font-size: var(--font-size-xs); color: var(--color-ink-muted);">MLX90396 SFI Differential Signal</span>
-        </div>
-
-        <div class="xyz-chart-wrapper">
-          <div class="xyz-toolbar">
-            <button class="btn-xyz-view active" data-view="iso">Isometric (3D)</button>
-            <button class="btn-xyz-view" data-view="x">X View (Side Y-Z)</button>
-            <button class="btn-xyz-view" data-view="y">Y View (Front X-Z)</button>
-            <button class="btn-xyz-view" data-view="z">Z View (Top X-Y)</button>
-          </div>
-
-          <div class="xyz-legend">
-            <span><span class="axis-dot" style="background: var(--color-danger);"></span>+X: <b id="xyz-val-x" style="color: var(--color-danger);">0.0</b> mT</span>
-            <span><span class="axis-dot" style="background: var(--color-success);"></span>+Y: <b id="xyz-val-y" style="color: var(--color-success);">0.0</b> mT</span>
-            <span><span class="axis-dot" style="background: var(--color-info);"></span>+Z: <b id="xyz-val-z" style="color: var(--color-info);">0.0</b> mT</span>
-          </div>
-
-          <div id="canvas-xyz-main"></div>
-
-          <div class="hint-overlay">
-            Left Click + Drag: Rotate Angle Freely | Scroll: Zoom | +Z Points Vertical UP
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 4: 4D SENSING & VELOCITY -->
-    <div id="tab-4d" class="tab-content">
-      <div class="ds-card ds-card--pad-md" style="width: 100%;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
-          <span style="font-family: var(--font-display); font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; color: var(--color-accent);">
-            4D Movement Telemetry & Particle Stream (From Example 2)
-          </span>
-          <span style="font-size: var(--font-size-xs); color: var(--color-warning);">Dynamic Magnetic Flux</span>
-        </div>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
-          <div style="display: flex; gap: var(--space-2);">
-            <button id="btn-mode-pos" class="ds-button ds-button--primary ds-button--sm">Position Control</button>
-            <button id="btn-mode-vel" class="ds-button ds-button--secondary ds-button--sm">Velocity Control</button>
-          </div>
-          <span id="ctrl-mode-desc" style="font-size: var(--font-size-xs); font-weight: 600; color: var(--color-accent);">
-            Mode: Direct Stick-to-Position Mapping
-          </span>
-        </div>
-
-        <div id="canvas4d-container">
-          <canvas id="simCanvas"></canvas>
-          
-          <div class="hud-overlay">
-            <div class="hud-title">4D Movement Telemetry</div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">X Axis (Tilt L/R):</span>
-              <span class="hud-metric-value val-cyan" id="val-x">0.00</span>
-            </div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">Y Axis (Tilt F/B):</span>
-              <span class="hud-metric-value val-cyan" id="val-y">0.00</span>
-            </div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">Z Axis (Depth Press):</span>
-              <span class="hud-metric-value val-cyan" id="val-z">0.00</span>
-            </div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">Velocity (Speed):</span>
-              <span class="hud-metric-value val-orange" id="val-vel">0.0 px/s</span>
-            </div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">Force / Pressure:</span>
-              <span class="hud-metric-value val-orange" id="val-force">0%</span>
-            </div>
-            
-            <div class="hud-title" style="margin-top: 10px;">Single IC Sensor State</div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">Field Sensing Mode:</span>
-              <span class="hud-metric-value val-green">3D Hall SFI</span>
-            </div>
-            <div class="hud-metric">
-              <span class="hud-metric-label">Magnetic Vector:</span>
-              <span class="hud-metric-value val-cyan" id="val-flux">0.0 mT</span>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -744,7 +722,7 @@
             <label class="ds-field__label" for="sel-driver-type">Target Device Driver</label>
             <select id="sel-driver-type" class="ds-field__input">
               <option value="scpi" selected>SCPI Bridge (MLX90396 SPI API)</option>
-              <option value="arduino">Direct Arduino Telemetry (CSV Stream)</option>
+              <option value="arduino">Direct Arduino Telemetry (Pipe or CSV Stream)</option>
             </select>
           </div>
 

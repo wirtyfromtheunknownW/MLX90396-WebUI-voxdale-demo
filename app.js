@@ -1,6 +1,6 @@
 import { MLX90396_API } from './mlx_api.js';
 import { Arduino_API } from './arduino_api.js';
-import { initSfiDemo, resizeSfiCanvases, updateSfiDomeKinematics, setHardwareCoilCallback, resetPlotLines } from './sfi_demo.js';
+import { initSfiDemo, resizeSfiCanvases, updateSfiDomeKinematics, setHardwareCoilCallback, setSfiHardwareTracking } from './sfi_demo.js';
 
 // DOM Elements
 const btnConnect = document.getElementById('btn-connect');
@@ -59,7 +59,6 @@ function initTabNavigation() {
         targetContent.classList.add('active');
       }
 
-      resetPlotLines(); // <--- Clears all trajectories instantly on tab switch
       setTimeout(resizeSfiCanvases, 40);
     });
   });
@@ -94,7 +93,16 @@ function processRx(text) {
       if (rxBuffer.trim() !== '') {
         const line = rxBuffer.trim();
         if (currentDriverType === 'arduino' && activeDevice) {
-          activeDevice.processLine(line);
+          const sample = activeDevice.processLine(line);
+          if (!sample.error) {
+            setSfiHardwareTracking(true);
+            updateSfiDomeKinematics(
+              sample.posX_mm / 2,
+              sample.posY_mm / 2,
+              sample.rawZ / 1000,
+              { p0Raw: { x: sample.rawX, y: sample.rawY, z: sample.rawZ }, diffRaw: { x: sample.rawX, y: sample.rawY, z: sample.rawZ } }
+            );
+          }
         } else {
           handlePrompt(line);
         }
@@ -259,6 +267,7 @@ async function disconnectSerial() {
   if (port) await port.close();
 
   port = null; reader = null; writer = null; activeDevice = null;
+  setSfiHardwareTracking(false);
   setUIConnected(false);
   btnStartDemo.disabled = false;
   btnStopDemo.disabled = true;
@@ -302,6 +311,7 @@ async function runJoystickDemo() {
           let rawX = 0, rawY = 0, rawZ = 0;
           let p0Raw = { x: 0, y: 0, z: 0 };
           let diffRaw = { x: 0, y: 0, z: 0 };
+          let hasLiveSample = false;
 
           if (currentDriverType === 'scpi') {
             await activeDevice.sm(0xFC000); 
@@ -313,6 +323,7 @@ async function runJoystickDemo() {
             const res23 = await activeDevice.rm(false, 0x03F00); 
 
             if (!res01.error && !res23.error) {
+              hasLiveSample = true;
               const avgX = (res01.x0 + res01.x1 + res23.x2 + res23.x3) / 4;
               const avgY = (res01.y0 + res01.y1 + res23.y2 + res23.y3) / 4;
               const avgZ = (res01.z0 + res01.z1 + res23.z2 + res23.z3) / 4;
@@ -321,6 +332,8 @@ async function runJoystickDemo() {
 
               const rawGradX = ((res01.x1 + res23.x2) - (res01.x0 + res23.x3)) / 2;
               const rawGradY = ((res01.y0 + res01.y1) - (res23.y3 + res23.y2)) / 2;
+              const rawGradZx = ((res01.z1 + res23.z2) - (res01.z0 + res23.z3)) / 2;
+              const rawGradZy = ((res01.z0 + res01.z1) - (res23.z3 + res23.z2)) / 2;
 
               const cleanGradX = rawGradX - (avgX * K_ROT_X);
               const cleanGradY = rawGradY - (avgY * K_ROT_Y);
@@ -334,11 +347,12 @@ async function runJoystickDemo() {
 
               // Extract actual individual pixel values for Requirement 1-3 Battle Matrix
               p0Raw = { x: res01.x0, y: res01.y0, z: res01.z0 };
-              diffRaw = { x: cleanGradX, y: cleanGradY, z: avgZ };
+              diffRaw = { x: cleanGradX, y: cleanGradY, z: rawGradZx, bzY: rawGradZy };
             }
           } else {
             const sample = await activeDevice.getSample();
             if (!sample.error) {
+              hasLiveSample = true;
               latestRawMagnet.x = sample.posX_mm;
               latestRawMagnet.y = sample.posY_mm;
               posX_mm = latestRawMagnet.x - magnetOffsets.x;
@@ -346,12 +360,15 @@ async function runJoystickDemo() {
               angleDeg = sample.angleDeg;
               rawX = sample.rawX; rawY = sample.rawY; rawZ = sample.rawZ;
               p0Raw = { x: rawX, y: rawY, z: rawZ };
-              diffRaw = { x: rawX, y: rawY, z: rawZ };
+              diffRaw = { x: rawX, y: rawY, z: rawZ, bzY: rawZ };
             }
           }
 
-          // Exact original live telemetry fed to the Dome Kinematics
-          updateSfiDomeKinematics(rawX / 1000, rawY / 1000, rawZ / 1000, { p0Raw, diffRaw });
+          // A valid sample takes the dome seamlessly from its idle pattern to hardware tracking.
+          if (hasLiveSample) {
+            setSfiHardwareTracking(true);
+            updateSfiDomeKinematics(rawX / 1000, rawY / 1000, rawZ / 1000, { p0Raw, diffRaw });
+          }
 
           await new Promise(r => setTimeout(r, currentDriverType === 'scpi' ? 50 : 25));
         } catch (loopErr) {
