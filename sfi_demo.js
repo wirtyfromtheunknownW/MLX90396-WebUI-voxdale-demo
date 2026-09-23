@@ -3,6 +3,22 @@
  * Standalone SFI Joystick, 3D Dome Kinematics, Centered Z-UP XYZ Chart, Polar Radar & Battle Matrix
  */
 
+// --- GLTFLoader (r128 non-module build, matches the global THREE loaded in index.html) ---
+let gltfLoaderPromise = null;
+function ensureGLTFLoader() {
+  if (!gltfLoaderPromise) {
+    gltfLoaderPromise = new Promise((resolve, reject) => {
+      if (window.THREE && THREE.GLTFLoader) { resolve(THREE.GLTFLoader); return; }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+      script.onload = () => resolve(THREE.GLTFLoader);
+      script.onerror = () => reject(new Error('Failed to load GLTFLoader'));
+      document.head.appendChild(script);
+    });
+  }
+  return gltfLoaderPromise;
+}
+
 // --- Calibration & Signal Math Engine ---
 export const DEFAULT_CALIBRATION_PARAMS = {
   k1: 1.0,   // Alpha K-factor
@@ -118,6 +134,12 @@ let mainSceneObj = null;
 let stdPlot = null;
 let mlxPlot = null;
 let joyAssemblyRef = null;
+let joyRestPosition = new THREE.Vector3();
+let joySensorPoint = new THREE.Vector3();
+let joyTipMarker = null;
+let joyTrailMesh = null;
+let joyTrailHistory = [];
+const tmpVec = new THREE.Vector3();
 
 let radarCanvasStd = null, radarCtxStd = null;
 let radarCanvasMlx = null, radarCtxMlx = null;
@@ -190,13 +212,12 @@ export function initSfiDemo() {
     resetPlotLines();
   });
 
-  // --- 1. THREE.JS DOME SCENE SETUP ---
+  // --- 1. THREE.JS SCENE SETUP (CAD GLB MODEL) ---
   const scene = new THREE.Scene();
   const width = container.clientWidth || 800;
   const height = container.clientHeight || 560;
 
   const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-  camera.position.set(0, 11, 21);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setClearColor(0x000000, 0);
@@ -205,137 +226,188 @@ export function initSfiDemo() {
   container.appendChild(renderer.domElement);
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 1.8, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
-  controls.minDistance = 10;
-  controls.maxDistance = 38;
+  controls.minDistance = 4;
+  controls.maxDistance = 60;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+  scene.add(new THREE.AmbientLight(0xffffff, 1.1));
   const dirLight = new THREE.DirectionalLight(0x00d2ff, 1.4);
   dirLight.position.set(10, 25, 15);
   scene.add(dirLight);
+  const hemiLight = new THREE.HemisphereLight(0xb0d0ff, 0x334455, 0.6);
+  scene.add(hemiLight);
 
-  const baseMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(5.2, 32, 16, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
-    new THREE.MeshStandardMaterial({ color: 0x0a2540, roughness: 0.2, metalness: 0.5 })
-  );
-  scene.add(baseMesh);
+  const MODEL_URL = 'resources/CAD-MLX90396_Demo.glb';
+  const DOME_WORLD_RADIUS = 5.2;
 
-  const rimMesh = new THREE.Mesh(
-    new THREE.TorusGeometry(5.25, 0.18, 16, 100),
-    new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.9, roughness: 0.1 })
-  );
-  rimMesh.rotation.x = Math.PI / 2;
-  scene.add(rimMesh);
-
-  const pcbMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(4.8, 4.8, 0.2, 32),
-    new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.4 })
-  );
-  pcbMesh.position.y = 0.1;
-  scene.add(pcbMesh);
-
-  const icMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1.6, 0.35, 1.6),
-    new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2 })
-  );
-  icMesh.position.y = 0.4;
-  scene.add(icMesh);
-
-  const pin1Dot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.08, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xffffff })
-  );
-  pin1Dot.position.set(-0.6, 0.59, -0.6);
-  scene.add(pin1Dot);
-
-  const domeRadius = 5.2;
   const joyAssembly = new THREE.Group();
   joyAssemblyRef = joyAssembly;
-
-  const axialMagnetGroup = new THREE.Group();
-  axialMagnetGroup.position.y = 0.61;
-
-  const northPoleMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.9, 0.9, 0.25, 32),
-    new THREE.MeshStandardMaterial({ color: 0xff1144, roughness: 0.2, metalness: 0.3 })
-  );
-  northPoleMesh.position.y = 0.125;
-  axialMagnetGroup.add(northPoleMesh);
-
-  const ringMesh = new THREE.Mesh(
-    new THREE.TorusGeometry(0.91, 0.03, 16, 32),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.9 })
-  );
-  ringMesh.rotation.x = Math.PI / 2;
-  ringMesh.position.y = 0.25;
-  axialMagnetGroup.add(ringMesh);
-
-  const southPoleMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.9, 0.9, 0.25, 32),
-    new THREE.MeshStandardMaterial({ color: 0x0088ff, roughness: 0.2, metalness: 0.3 })
-  );
-  southPoleMesh.position.y = 0.375;
-  axialMagnetGroup.add(southPoleMesh);
-  joyAssembly.add(axialMagnetGroup);
-
-  const shaftMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.22, 3.2, 16),
-    new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.6 })
-  );
-  shaftMesh.position.y = 2.4;
-  joyAssembly.add(shaftMesh);
-
-  const knobMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.85, 0.65, 1.8, 24),
-    new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.2 })
-  );
-  knobMesh.position.y = 4.2;
-  joyAssembly.add(knobMesh);
-  scene.add(joyAssembly);
-
-  const domeMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(domeRadius, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.5),
-    new THREE.MeshStandardMaterial({
-      color: 0x4a5568,
-      transparent: true,
-      opacity: 0.4,
-      roughness: 0.15,
-      metalness: 0.1
-    })
-  );
-  scene.add(domeMesh);
 
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   let isDraggingKnob = false;
 
-  container.addEventListener('mousedown', (e) => {
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / container.clientWidth) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / container.clientHeight) * 2 + 1;
+  function setupMouseInteractions(interactiveObj) {
+    container.addEventListener('mousedown', (e) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / container.clientWidth) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / container.clientHeight) * 2 + 1;
 
-    raycaster.setFromCamera(mouse, camera);
-    if (raycaster.intersectObject(knobMesh).length > 0 || e.shiftKey) {
-      isDraggingKnob = true;
-      controls.enabled = false;
-      autoPattern = false;
+      raycaster.setFromCamera(mouse, camera);
+      if ((interactiveObj && raycaster.intersectObject(interactiveObj, true).length > 0) || e.shiftKey) {
+        isDraggingKnob = true;
+        controls.enabled = false;
+        autoPattern = false;
+      }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingKnob) return;
+      targetJoyX = Math.max(-1, Math.min(1, (((e.clientX - renderer.domElement.getBoundingClientRect().left) / container.clientWidth) * 2 - 1) * 1.5));
+      targetJoyY = Math.max(-1, Math.min(1, (-((e.clientY - renderer.domElement.getBoundingClientRect().top) / container.clientHeight) * 2 + 1) * 1.5));
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDraggingKnob) {
+        isDraggingKnob = false;
+        controls.enabled = true;
+      }
+    });
+  }
+
+  (async () => {
+    try {
+      const GLTFLoaderClass = await ensureGLTFLoader();
+      const gltf = await new GLTFLoaderClass().loadAsync(MODEL_URL);
+      const model = gltf.scene;
+
+      // Remove CAD camera nodes; they are not part of the visible model.
+      const cameraNodes = [];
+      model.traverse((node) => {
+        if (node.isCamera) cameraNodes.push(node);
+      });
+      cameraNodes.forEach((node) => node.parent && node.parent.remove(node));
+
+      // Reparent the moving joystick parts (as whole top-level nodes) into the
+      // animated assembly group. Moving whole subtrees keeps every child's
+      // transform (e.g. the magnet's meshes under its group) intact. Static by
+      // construction: dome, base, PCB, compass, coil, unnamed nodes, or
+      // instanced duplicates (mesh_9_instance_1 = the mirrored coil).
+      const STATIC_PART_NAMES = new Set([
+        'DomeAssy',
+        'BottomBodyCoilTest2-1',
+        'MelexisPCB-1',
+        'TestCompass2-1',
+        'CoilRoundLarge-1',
+        'current camera'
+      ]);
+      const isStaticName = (name) =>
+        STATIC_PART_NAMES.has(name) || name === '' || name.includes('_instance_');
+
+      const partsContainer = model.getObjectByName('Snowglobe') || model;
+      const movingParts = [];
+      Array.from(partsContainer.children).forEach((child) => {
+        if (!isStaticName(child.name)) movingParts.push(child);
+      });
+      movingParts.forEach((node) => joyAssembly.add(node));
+      console.log('[CAD GLB] moving parts:', movingParts.map((n) => n.name));
+
+      scene.add(model);
+      if (joyAssembly.children.length > 0) scene.add(joyAssembly);
+
+      // Normalize the CAD dome radius to the world scale used by dome kinematics.
+      const domeNode = model.getObjectByName('DomeAssy') || model.getObjectByName('Dome-1') || model;
+      const domeBox = new THREE.Box3().setFromObject(domeNode);
+      const domeHeight = Math.max(0.0001, domeBox.max.y - domeBox.min.y);
+      const scale = DOME_WORLD_RADIUS / domeHeight;
+      model.scale.setScalar(scale);
+      if (joyAssembly.children.length > 0) joyAssembly.scale.setScalar(scale);
+
+      // Center on X/Z.
+      const wholeBox = new THREE.Box3().setFromObject(model);
+      const center = wholeBox.getCenter(new THREE.Vector3());
+      model.position.x = -center.x;
+      model.position.z = -center.z;
+      if (joyAssembly.children.length > 0) {
+        // Keep the assembly at its CAD rest position so the magnet keeps the
+        // ~11 mm CAD airgap above the sensor when untilted.
+        joyAssembly.position.x = -center.x;
+        joyAssembly.position.z = -center.z;
+        joyRestPosition.copy(joyAssembly.position);
+      }
+
+      // Frame the camera on the model bounding box.
+      const finalBox = new THREE.Box3().setFromObject(model);
+      const size = finalBox.getSize(new THREE.Vector3());
+      const yCenter = (finalBox.min.y + finalBox.max.y) / 2;
+      controls.target.set(0, yCenter, 0);
+      controls.update();
+      camera.position.set(size.x * 1.5, yCenter + size.y * 0.8, size.z * 2.1);
+      camera.lookAt(controls.target);
+
+      // Mark the sensor point (top center of the MLX90396 PCB) in world space.
+      // The joystick assembly rotates rigidly about this point, so the CAD
+      // airgap (~11 mm) between the sensor and the magnet face is preserved
+      // at every tilt angle.
+      const pcbNode = model.getObjectByName('MelexisPCB-1') || model;
+      const pcbBox = new THREE.Box3().setFromObject(pcbNode);
+      joySensorPoint.set(
+        (pcbBox.min.x + pcbBox.max.x) / 2,
+        pcbBox.max.y,
+        (pcbBox.min.z + pcbBox.max.z) / 2
+      );
+
+      const knob = joyAssembly.getObjectByName('JoystickButton-1') || joyAssembly;
+      setupMouseInteractions(knob);
+
+      // Bright marker on the lower tip of the M3 rod (the magnet holder) that
+      // tracks the stick; leaves a short fading trail behind it. Values are in
+      // CAD units because the marker is a child of the scaled assembly group.
+      const markerRadius = 0.0035;
+      joyTipMarker = new THREE.Mesh(
+        new THREE.SphereGeometry(markerRadius, 16, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0xff3b30,
+          emissive: 0xff2200,
+          emissiveIntensity: 2.5,
+          roughness: 0.3,
+          metalness: 0.1
+        })
+      );
+      const magnetNode = joyAssembly.getObjectByName('mesh_7') ||
+        joyAssembly.getObjectByName('mesh_7_1') || null;
+      const rodNode = joyAssembly.getObjectByName('M3_rod-1') || joyAssembly;
+      if (magnetNode) {
+        joyTipMarker.position.copy(magnetNode.position);
+        joyTipMarker.position.y = magnetNode.position.y + 0.0004;
+      } else {
+        joyTipMarker.position.set(0, 0.0252, 0);
+      }
+      joyAssembly.add(joyTipMarker);
+
+      joyTrailHistory = [];
+      const TRAIL_POINTS = 14;
+      joyTrailMesh = new THREE.Group();
+      for (let i = 0; i < TRAIL_POINTS; i++) {
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(markerRadius * scale * (1 - i * 0.045), 8, 8),
+          new THREE.MeshBasicMaterial({
+            color: 0xff6030,
+            transparent: true,
+            opacity: Math.max(0, 0.55 - i * 0.042),
+            depthWrite: false
+          })
+        );
+        dot.userData.index = i;
+        joyTrailMesh.add(dot);
+      }
+      joyTrailMesh.visible = true;
+      scene.add(joyTrailMesh);
+    } catch (err) {
+      console.error('[CAD GLB LOAD ERROR]', err);
     }
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!isDraggingKnob) return;
-    targetJoyX = Math.max(-1, Math.min(1, (((e.clientX - renderer.domElement.getBoundingClientRect().left) / container.clientWidth) * 2 - 1) * 1.5));
-    targetJoyY = Math.max(-1, Math.min(1, (-((e.clientY - renderer.domElement.getBoundingClientRect().top) / container.clientHeight) * 2 + 1) * 1.5));
-  });
-
-  window.addEventListener('mouseup', () => {
-    if (isDraggingKnob) {
-      isDraggingKnob = false;
-      controls.enabled = true;
-    }
-  });
+  })();
 
   mainSceneObj = { scene, camera, renderer, controls, container };
 
@@ -380,16 +452,39 @@ export function initSfiDemo() {
     joyY += (targetJoyY - joyY) * smoothing;
     joyZ += (targetJoyZ - joyZ) * smoothing;
 
-    let tiltAngle = Math.sqrt(joyX * joyX + joyY * joyY) * 0.45;
+    const TILT_MAX_RAD = 0.55;
+    let tiltAngle = Math.sqrt(joyX * joyX + joyY * joyY) * TILT_MAX_RAD;
     let tiltDir = Math.atan2(joyY, joyX);
 
-    joyAssembly.position.set(
-      Math.sin(tiltAngle) * Math.cos(tiltDir) * domeRadius,
-      Math.cos(tiltAngle) * domeRadius + (joyZ * 0.3),
-      Math.sin(tiltAngle) * Math.sin(tiltDir) * domeRadius
-    );
-    joyAssembly.rotation.z = -joyX * 0.35;
-    joyAssembly.rotation.x = joyY * 0.35;
+    // Rotate the joystick assembly rigidly about the sensor point. Every point
+    // of the assembly (including the magnet face) keeps its initial distance to
+    // the sensor, so the ~11 mm airgap is constant for all tilt angles.
+    if (joyAssemblyRef) {
+      const q = new THREE.Quaternion();
+      if (tiltAngle > 0.0001) {
+        const axis = new THREE.Vector3(Math.sin(tiltDir), 0, -Math.cos(tiltDir));
+        q.setFromAxisAngle(axis, tiltAngle);
+      }
+      // Rebuild from the stored rest position each frame to avoid drift.
+      joyAssemblyRef.quaternion.copy(q);
+      joyAssemblyRef.position.copy(joyRestPosition).sub(joySensorPoint).applyQuaternion(q).add(joySensorPoint);
+      // Z press: the M3 rod (magnet holder) slides down its rotated shaft axis,
+      // pushing the magnet toward the sensor (smaller airgap -> stronger Bz).
+      joyAssemblyRef.position.add(new THREE.Vector3(0, -joyZ * 0.3, 0).applyQuaternion(q));
+    }
+
+    // Update the marker trail: record the marker's world position, keep a short
+    // history, and lay trail dots along it (fading and shrinking with age).
+    if (joyTipMarker && joyTrailMesh) {
+      joyTipMarker.getWorldPosition(tmpVec);
+      joyTrailHistory.unshift(tmpVec.clone());
+      if (joyTrailHistory.length > 32) joyTrailHistory.length = 32;
+      joyTrailMesh.children.forEach((dot) => {
+        const idx = dot.userData.index;
+        const histIdx = Math.min(joyTrailHistory.length - 1, idx + 1);
+        dot.position.copy(joyTrailHistory[histIdx] || tmpVec);
+      });
+    }
 
     const joyPosTxt = document.getElementById('joy-pos-text');
     if (joyPosTxt) {
@@ -830,16 +925,25 @@ function update3DPlot(plot, history, isLegacy) {
     plot.headMesh.rotation.z = -px * 0.4;
     plot.headMesh.rotation.x = pz * 0.4;
 
-    const valuesEl = document.getElementById(isLegacy ? 'plot-std-values' : 'plot-mlx-values');
-    if (valuesEl) {
-      valuesEl.innerHTML = isLegacy
-        ? `Bx ${last.x.toFixed(1)} | By ${last.y.toFixed(1)} | Bz ${(last.rawZ ?? last.z ?? 0).toFixed(1)} mT`
-        : `dBx/dx ${(last.rawX ?? 0).toFixed(1)} | dBy/dy ${(last.rawY ?? 0).toFixed(1)}<br>dBz/dx ${(last.rawZx ?? last.x).toFixed(1)} | dBz/dy ${(last.rawZy ?? last.y).toFixed(1)} mT/mm`;
+if (isLegacy) {
+      setBoxVal('plot-std-bx', last.x);
+      setBoxVal('plot-std-by', last.y);
+      setBoxVal('plot-std-bz', last.rawZ ?? last.z ?? 0);
+    } else {
+      setBoxVal('plot-mlx-dbx', last.rawX ?? 0);
+      setBoxVal('plot-mlx-dby', last.rawY ?? 0);
+      setBoxVal('plot-mlx-dbzdx', last.rawZx ?? last.x);
+      setBoxVal('plot-mlx-dbzdy', last.rawZy ?? last.y);
     }
   }
 
   plot.controls.update();
   plot.renderer.render(plot.scene, plot.camera);
+}
+
+function setBoxVal(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = Number.isFinite(value) ? value.toFixed(1) : '0.0';
 }
 
 export function resetPlotLines() {

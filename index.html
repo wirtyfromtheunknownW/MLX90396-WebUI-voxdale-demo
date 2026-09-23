@@ -451,6 +451,45 @@
     }
     .plot3d-canvas:active { cursor: grabbing; }
 
+    .plot-overlay-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .plot-overlay-units {
+      opacity: 0.6;
+    }
+    .plot-overlay-boxes {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .xyz-value-box {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 120px;
+      padding: 2px 6px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--color-surface-raised) 72%, transparent);
+      line-height: 1.2;
+    }
+    .xyz-value-lbl {
+      font-size: 9px;
+      text-transform: uppercase;
+      opacity: 0.65;
+    }
+    .xyz-value-box b {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
     .diagnostics-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -776,11 +815,11 @@
       <div class="battle-matrix-grid telemetry-graphs-expanded">
         <div class="battle-card fail">
           <div class="battle-card-header"><span>Legacy field and 6 mm magnet model</span><span class="ds-badge ds-badge--success">STRAY-SENSITIVE</span></div>
-          <div class="plot3d-canvas" id="canvas3d-std-plot"><div id="plot-overlay-std" class="plot-overlay" style="font-size: 13px;"><span id="plot-std-velocity">v 0.0 px/s</span><br>F 0%<br><span id="plot-std-values">Bx 0.0 | By 0.0 | Bz 0.0 mT</span></div></div>
+          <div class="plot3d-canvas" id="canvas3d-std-plot"><div id="plot-overlay-std" class="plot-overlay" style="font-size: 13px;"><div class="plot-overlay-row"><span id="plot-std-velocity">v 0.0 px/s</span><span class="plot-overlay-units">mT</span></div><div class="plot-overlay-boxes"><span class="xyz-value-box"><span class="xyz-value-lbl">Bx</span><b id="plot-std-bx">0.0</b></span><span class="xyz-value-box"><span class="xyz-value-lbl">By</span><b id="plot-std-by">0.0</b></span><span class="xyz-value-box"><span class="xyz-value-lbl">Bz</span><b id="plot-std-bz">0.0</b></span></div></div></div>
         </div>
         <div class="battle-card pass">
           <div class="battle-card-header"><span>MLX90396 differential field and 6 mm magnet model</span><span class="ds-badge ds-badge--success">SFI COMPENSATED</span></div>
-          <div class="plot3d-canvas" id="canvas3d-mlx-plot"><div id="plot-overlay-mlx" class="plot-overlay" style="font-size: 12px;"><span id="plot-mlx-velocity">v 0.0 px/s</span><br>F 0%<br><span id="plot-mlx-values">dBx/dx 0.0 | dBy/dy 0.0<br>dBz/dx 0.0 | dBz/dy 0.0 mT/mm</span></div></div>
+          <div class="plot3d-canvas" id="canvas3d-mlx-plot"><div id="plot-overlay-mlx" class="plot-overlay" style="font-size: 12px;"><div class="plot-overlay-row"><span id="plot-mlx-velocity">v 0.0 px/s</span><span class="plot-overlay-units">mT/mm</span></div><div class="plot-overlay-boxes"><span class="xyz-value-box"><span class="xyz-value-lbl">ΔBx/Δx</span><b id="plot-mlx-dbx">0.0</b></span><span class="xyz-value-box"><span class="xyz-value-lbl">ΔBy/Δy</span><b id="plot-mlx-dby">0.0</b></span><span class="xyz-value-box"><span class="xyz-value-lbl">ΔBz/Δx</span><b id="plot-mlx-dbzdx">0.0</b></span><span class="xyz-value-box"><span class="xyz-value-lbl">ΔBz/Δy</span><b id="plot-mlx-dbzdy">0.0</b></span></div></div></div>
         </div>
       </div>
 
