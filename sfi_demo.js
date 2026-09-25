@@ -135,7 +135,7 @@ let stdPlot = null;
 let mlxPlot = null;
 let joyAssemblyRef = null;
 let joyRestPosition = new THREE.Vector3();
-let joySensorPoint = new THREE.Vector3();
+let joyPivotPoint = new THREE.Vector3();
 let joyTipMarker = null;
 let joyTrailMesh = null;
 let joyTrailHistory = [];
@@ -346,16 +346,18 @@ export function initSfiDemo() {
       camera.position.set(size.x * 1.5, yCenter + size.y * 0.8, size.z * 2.1);
       camera.lookAt(controls.target);
 
-      // Mark the sensor point (top center of the MLX90396 PCB) in world space.
-      // The joystick assembly rotates rigidly about this point, so the CAD
-      // airgap (~11 mm) between the sensor and the magnet face is preserved
-      // at every tilt angle.
-      const pcbNode = model.getObjectByName('MelexisPCB-1') || model;
-      const pcbBox = new THREE.Box3().setFromObject(pcbNode);
-      joySensorPoint.set(
-        (pcbBox.min.x + pcbBox.max.x) / 2,
-        pcbBox.max.y,
-        (pcbBox.min.z + pcbBox.max.z) / 2
+      // Mark the pivot point in world space. A real joystick pivots where the
+      // stick passes through the housing opening (the ball joint / sleeve), not
+      // at the PCB below it. Pivoting the assembly about the JoystickInnerPart
+      // sleeve keeps the stick centered in the dome opening at every tilt
+      // angle, so the dome hole never limits the stick's movement.
+      const sleeve = joyAssembly.getObjectByName('JoystickInnerPart-1') ||
+        model.getObjectByName('JoystickInnerPart-1') || model;
+      const sleeveBox = new THREE.Box3().setFromObject(sleeve);
+      joyPivotPoint.set(
+        (sleeveBox.min.x + sleeveBox.max.x) / 2,
+        (sleeveBox.min.y + sleeveBox.max.y) / 2,
+        (sleeveBox.min.z + sleeveBox.max.z) / 2
       );
 
       const knob = joyAssembly.getObjectByName('JoystickButton-1') || joyAssembly;
@@ -412,8 +414,8 @@ export function initSfiDemo() {
   mainSceneObj = { scene, camera, renderer, controls, container };
 
   // Setup subplots and radars
-  stdPlot = create3DFieldPlot('canvas3d-std-plot', 0xef4444);
-  mlxPlot = create3DFieldPlot('canvas3d-mlx-plot', 0x10b981);
+  stdPlot = create3DFieldPlot('canvas3d-std-plot', 0xef4444, 16.0);
+  mlxPlot = create3DFieldPlot('canvas3d-mlx-plot', 0x10b981, 2.5);
   initRadarCanvases();
 
   let previousFrameTime = performance.now();
@@ -452,13 +454,14 @@ export function initSfiDemo() {
     joyY += (targetJoyY - joyY) * smoothing;
     joyZ += (targetJoyZ - joyZ) * smoothing;
 
-    const TILT_MAX_RAD = 0.55;
+    const TILT_MAX_RAD = 0.19;
     let tiltAngle = Math.sqrt(joyX * joyX + joyY * joyY) * TILT_MAX_RAD;
     let tiltDir = Math.atan2(joyY, joyX);
 
-    // Rotate the joystick assembly rigidly about the sensor point. Every point
-    // of the assembly (including the magnet face) keeps its initial distance to
-    // the sensor, so the ~11 mm airgap is constant for all tilt angles.
+    // Rotate the joystick assembly rigidly about the spherical joint where the
+    // stick passes through the dome opening. Every point of the assembly keeps
+    // its distance to the pivot, so the stick stays centered in the dome hole
+    // for all tilt angles and the hole never limits the stick's movement.
     if (joyAssemblyRef) {
       const q = new THREE.Quaternion();
       if (tiltAngle > 0.0001) {
@@ -467,7 +470,7 @@ export function initSfiDemo() {
       }
       // Rebuild from the stored rest position each frame to avoid drift.
       joyAssemblyRef.quaternion.copy(q);
-      joyAssemblyRef.position.copy(joyRestPosition).sub(joySensorPoint).applyQuaternion(q).add(joySensorPoint);
+      joyAssemblyRef.position.copy(joyRestPosition).sub(joyPivotPoint).applyQuaternion(q).add(joyPivotPoint);
       // Z press: the M3 rod (magnet holder) slides down its rotated shaft axis,
       // pushing the magnet toward the sensor (smaller airgap -> stronger Bz).
       joyAssemblyRef.position.add(new THREE.Vector3(0, -joyZ * 0.3, 0).applyQuaternion(q));
@@ -787,7 +790,7 @@ function drawRadar(ctx, curX, curY, target, themeColor, label, maxScale = 28.0) 
   ctx.shadowBlur = 0;
 }
 
-function create3DFieldPlot(elementId, ringColor) {
+function create3DFieldPlot(elementId, ringColor, fullScale = 28.0) {
   const el = document.getElementById(elementId);
   if (!el) return null;
 
@@ -873,6 +876,7 @@ function create3DFieldPlot(elementId, ringColor) {
     traceMaterial,
     headMesh: magnetGroup,
     maxPoints,
+    fullScale,
     el
   };
 }
@@ -885,7 +889,12 @@ function update3DPlot(plot, history, isLegacy) {
     Math.abs(pt.y),
     Math.abs(pt.z || 0)
   )));
-  const SCALE = Math.min(0.16, 2.4 / maxAbs);
+  // Each plot scales its own channel range onto the grid, so the magnet head
+  // swings a similar distance for the legacy (mT) and the differential
+  // (mT/mm) signals. fullScale is the channel range that maps to ~2.4 world
+  // units; the maxAbs term keeps a small signal from over-zooming the head.
+  const refScale = plot.fullScale || 28.0;
+  const SCALE = Math.min(2.4 / refScale, 2.4 / maxAbs);
 
   for (let i = 0; i < len; i++) {
     const pt = history[i];
